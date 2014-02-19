@@ -32,6 +32,7 @@
 #include <alsa/asoundlib.h>
 #include "common.h"
 #include "audio.h"
+#include <time.h>
 
 static void help(void);
 static int init(int argc, char **argv);
@@ -151,14 +152,23 @@ static void deinit(void) {
 }
 
 static void start(int sample_rate) {
+	unsigned period_time = 0;
+	unsigned buffer_time = 0;
+	
     if (sample_rate != 44100)
         die("Unexpected sample rate!");
 
     int ret, dir = 0;
-    snd_pcm_uframes_t frames = 64;
-    ret = snd_pcm_open(&alsa_handle, alsa_out_dev, SND_PCM_STREAM_PLAYBACK, 0);
-    if (ret < 0)
-        die("Alsa initialization failed: unable to open pcm device: %s\n", snd_strerror(ret));
+
+    //test
+    //snd_pcm_uframes_t frames = 64;
+    do{
+		ret = snd_pcm_open(&alsa_handle, alsa_out_dev, SND_PCM_STREAM_PLAYBACK, 0);
+		if (ret < 0){
+			printf("Alsa initialization failed: unable to open pcm device: %s\n", snd_strerror(ret));
+			sleep(10);
+		}
+	}while(ret<0);//to handle the situation that sound card was already occupied by other app 
 
     snd_pcm_hw_params_alloca(&alsa_params);
     snd_pcm_hw_params_any(alsa_handle, alsa_params);
@@ -166,7 +176,24 @@ static void start(int sample_rate) {
     snd_pcm_hw_params_set_format(alsa_handle, alsa_params, SND_PCM_FORMAT_S16);
     snd_pcm_hw_params_set_channels(alsa_handle, alsa_params, 2);
     snd_pcm_hw_params_set_rate_near(alsa_handle, alsa_params, (unsigned int *)&sample_rate, &dir);
-    snd_pcm_hw_params_set_period_size_near(alsa_handle, alsa_params, &frames, &dir);
+    //snd_pcm_hw_params_set_period_size_near(alsa_handle, alsa_params, &frames, &dir);
+    //the frame size is too small, use the dynamic buffer size applied by aplay in alsa-utiles instead
+	ret = snd_pcm_hw_params_get_buffer_time_max(alsa_params, &buffer_time, 0);
+	if( ret < 0 )
+		die( "snd_pcm_hw_params_get_buffer_time_max error %d\n", buffer_time);
+ 
+	if (buffer_time > 500000)
+		buffer_time = 500000;
+ 
+	period_time = buffer_time / 40;
+ 
+	ret = snd_pcm_hw_params_set_period_time_near(alsa_handle, alsa_params, &period_time, 0);
+	if( ret < 0 )
+		die( "snd_pcm_hw_params_set_period_time_near error %d\n", period_time);
+ 
+	ret = snd_pcm_hw_params_set_buffer_time_near(alsa_handle, alsa_params, &buffer_time, 0);
+	if( ret < 0 )
+		die( "snd_pcm_hw_params_set_buffer_time_near error %d\n", buffer_time); 
     ret = snd_pcm_hw_params(alsa_handle, alsa_params);
     if (ret < 0)
         die("unable to set hw parameters: %s\n", snd_strerror(ret));
